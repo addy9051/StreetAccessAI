@@ -1,58 +1,69 @@
 ---
 name: street-access-builder
-description: Builds StreetAccess with a swappable perception adapter, human-reviewed reports, uncertainty-aware route comparisons, and evaluation gates. Use when planning, implementing, or reviewing StreetAccess.
+description: Builds StreetAccessAI as a standalone project with provider-neutral mock perception, human-reviewed reports, uncertainty-aware route comparisons, and staged evaluation. Use for planning, implementation, or review of StreetAccessAI.
 ---
 
-# StreetAccess Builder
+# StreetAccessAI Builder
 
-Use this skill for StreetAccess work. Keep the existing ReturnsShield application unchanged; create StreetAccess in its own `streetaccess/` directory unless the user explicitly directs otherwise.
+Use this skill only for the StreetAccessAI repository. First inspect its current files and repository instructions. Preserve existing work and conventions; do not assume a framework or scaffold until you inspect the repo.
 
-## Product boundary
+## Product definition and safety boundary
 
-StreetAccess compares walking-route options using community reports about pedestrian conditions. It does not certify that a route is safe, accessible, or obstacle-free. A missing report means `UNKNOWN` unless that segment has a recent, recorded survey.
+StreetAccessAI compares available walking-route options using community reports about pedestrian conditions. It does not certify that a route is safe, accessible, or obstacle-free. No report means UNKNOWN unless the segment has a recent, recorded survey.
 
-Model output is an unverified observation. It must never enter the active route evidence set until the report passes the verification workflow. Route explanations must be generated from persisted, verified records and deterministic application logic, not from free-form model output.
+Perception output is an unverified observation. It must never affect route comparisons until a report passes the verification workflow. User-facing explanations must be derived from persisted verified records and deterministic application logic, not free-form model output.
 
-## Runtime model boundary
+## IDE model versus product runtime
 
-- Antigravity's coding-agent model is an IDE setting. Do not configure or change it from application code.
-- Do not assume a product perception provider has been selected. The initial implementation must use a `PerceptionAdapter` interface and a deterministic/mock adapter backed by fixtures.
-- Do not add Gemini runtime calls, API keys, `GEMINI_API_MODEL`, cloud model configuration, or provider-specific dependencies in the MVP.
-- Keep observation DTOs and validation provider-neutral. A future provider adapter may be added only after the user selects a runtime model and approves that implementation scope.
-- The mock adapter must return stable outputs for the same fixture and support malformed/empty input cases. It must be clearly marked as mock data in the API and UI.
+- The model selected in Antigravity is the coding assistant only. Do not configure or change it from application code.
+- For the initial product implementation, define a provider-neutral `PerceptionAdapter` and use a deterministic mock/fixture adapter.
+- Do not add Gemini or another model API call, model API key, `GEMINI_API_MODEL`, cloud-model setting, or provider-specific runtime dependency in the MVP.
+- Keep observation DTOs and validation independent of any model SDK. A future provider adapter requires the user to choose the model and explicitly request integration.
+- Mark fixture-derived observations as mock data in API responses and UI. Never present a mock observation as real street evidence.
 
-## Architecture and data rules
+## Repository and architecture
 
-Keep modules separate for `perception`, `verification`, `routing`, `evals`, and `api`. Use typed request/response models and explicit interfaces between modules.
+- Keep all work in this repository. Do not refer to or modify ReturnsSheildAI/ReturnsShield files.
+- Preserve the repository's established language, framework, and conventions where possible. If the repository is empty, propose a minimal stack and directory layout before scaffolding.
+- Separate perception, verification, routing, evaluation, and API responsibilities. Use typed contracts and narrow interfaces.
+- Make changes incrementally. Summarize the intended files and behavior before each stage; avoid unrelated refactors.
 
-Represent perception as frame-level observations. Each observation must include a valid frame index or timestamp, category, coarse passability (`clear`, `narrowed`, `blocked`, `unknown`), normalized bounding box when applicable, and visual evidence text. Validate box order and bounds server-side. Do not request metric widths, calibrated severity, GPS confidence, or cross-frame track IDs from a VLM.
+## Observation and data contracts
 
-Treat GPS, bearing, visual location, and route-segment match confidence as separate evidence fields. Preserve reported GPS accuracy. A matching algorithm must be able to return `CONFIDENT`, `AMBIGUOUS`, or `UNMATCHED`; never silently snap an ambiguous report to one of multiple nearby sidewalks or parallel roads. Do not hard-code buffer sizes, bearing thresholds, decay half-lives, or coverage thresholds as validated facts. Keep provisional values configurable and document them as hypotheses.
+Represent findings as frame-level observations with a valid frame index or timestamp, category, coarse passability (`clear`, `narrowed`, `blocked`, `unknown`), normalized bounding box when applicable, and concise factual evidence text. Validate frame references, box ordering, and coordinate bounds server-side.
 
-Use a documented dataset manifest and group-level split strategy. Avoid near-duplicate leakage across train/validation/test. Verify the actual labels, annotation availability, and license of every dataset before relying on it. Treat SANPO as a baseline for the labels it actually contains; do not claim it validates India-specific obstacle classes unless those classes are annotated.
+Do not infer metric width, calibrated severity, GPS confidence, or cross-frame identity from mock/VLM output. Keep sensor accuracy, visual observation confidence, and route-segment match confidence as distinct fields.
 
-## Verification workflow
+Use an explicit dataset manifest and documented group-level split strategy. Check each dataset's actual labels, annotation coverage, and license. Treat SANPO as a baseline only for classes and conditions it actually annotates; it does not establish accuracy for India-specific obstacle classes without corresponding labels.
 
-Use explicit states and a declarative transition table. At minimum support uploader confirmation, pending independent review, needs-more-evidence, verified, rejected, disputed, and expired states.
+## Verification invariants
 
-- Enforce role checks on the server; client-provided role names are not authorization.
+Use explicit states and a declarative transition table. Support uploader confirmation, pending independent review, needs-more-evidence, verified, rejected, disputed, and expired states where these fit the MVP.
+
+- Enforce authorization on the server; never trust a client-supplied role.
 - An uploader cannot verify their own report.
-- A report can affect route comparisons only in `VERIFIED` state.
-- Dispute resolution must be performed by an authorized moderator who is distinct from the uploader, prior verifier(s), and disputers.
-- TTL expiry must apply only to eligible states and must record a valid transition.
-- Reject invalid transitions without mutating the report or appending a misleading audit event.
-- Persist transitions transactionally. Make the audit trail append-only at the storage layer where practical; do not describe a mutable in-memory list as immutable.
+- Only VERIFIED reports may enter route comparisons.
+- Dispute resolution must use an authorized moderator distinct from the uploader, prior verifier(s), and disputers.
+- TTL expiry is allowed only from explicitly eligible states.
+- Invalid transitions must fail without mutating state or adding an audit event.
+- Persist transitions transactionally. Use append-only audit persistence where practical; do not call a mutable in-memory list immutable.
 
-## Route comparison
+## Spatial matching and route comparisons
 
-Start with a synthetic pedestrian graph and deterministic evidence fixtures. Make route trade-offs explicit (for example, estimated time, recent verified barriers, stale reports, and surveyed coverage). Do not combine arbitrary units into an unexplained score. Do not describe a route as clear because no reports exist.
+Start with a synthetic pedestrian graph and deterministic fixtures. A spatial matcher must return `CONFIDENT`, `AMBIGUOUS`, or `UNMATCHED`; never silently attach a report to one of multiple plausible parallel sidewalks or roads. Preserve GPS accuracy and treat bearing as supporting evidence, not an unquestioned hard filter.
 
-Define coverage from route-segment length and survey state. Distinguish `UNSURVEYED`, `STALE_ONLY`, and recently surveyed conditions. If only one candidate route is returned, do not show comparative badges. Show the Google walking-route beta warning whenever Google walking routes are displayed, and follow the current Maps API attribution, display, and caching policies before enabling that adapter.
+Define surveyed coverage by route-segment length and survey state. Distinguish `UNSURVEYED`, `STALE_ONLY`, and recently surveyed evidence. Do not treat lack of reports as evidence that a segment is clear.
 
-## Evaluation and delivery
+Present transparent trade-offs such as estimated time, recent verified barriers, stale reports, and unknown coverage. Avoid arbitrary composite scores. When only one route is available, do not show comparative badges.
 
-Keep perception evaluation separate from report verification and route ranking. Match metrics to available labels: use box metrics only when box annotations exist, mask metrics for masks, and tracking metrics only when per-frame object identity ground truth exists. Do not claim a dataset supports a metric it cannot support.
+Do not enable live Google Routes integration until the synthetic comparator and spatial matching are reviewed. Before displaying Google walking routes, include the required walking-route beta warning and follow current Maps attribution, display, and caching policies.
 
-For route evaluation, use synthetic scenarios with explicit expected trade-offs and report unknown coverage. For local data, document consent, PII blurring, retention, and deletion behavior before collection or upload. Never silently upload video.
+## Evaluation, privacy, and completion
 
-Work incrementally. First inspect the repository and report the proposed file plan. Implement only the next stage, keep the application runnable, and explain assumptions or blockers. Do not change unrelated ReturnsShield files. Do not add production model integration or live navigation until the user requests it.
+Keep perception evaluation separate from verification and route ranking. Match each metric to available ground truth: box metrics need box annotations, mask metrics need masks, and tracking metrics need per-frame identity annotations. Do not claim a benchmark validates classes or metrics it does not contain.
+
+Evaluate routing first on synthetic cases with known expected trade-offs, including stale evidence, ambiguous matches, low coverage, and single-route responses. Clearly distinguish synthetic evaluation from field validation.
+
+Before collecting or uploading real street imagery, define consent, face/license-plate handling, retention, and deletion behavior. Never silently upload video.
+
+At the end of each stage, report changed files, key decisions, how to run the project, evaluation performed, and remaining limitations. Do not add live model integration, live navigation, or real-data collection unless the user requests it.
